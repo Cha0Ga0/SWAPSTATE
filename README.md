@@ -1,6 +1,6 @@
 # Hidden-State Swap for Instruction Causal Analysis
 
-This repository implements a **token-aligned hidden-state swap method** for analyzing the **causal effects of instructions (prompts) on large language models**.
+This repository implements a **token-aligned hidden-state swap method** for analyzing the **causal effects of instructions on large language models**.
 
 The core goal is to isolate how *instructional differences* influence internal representations and final generations, while keeping the question itself fixed.
 
@@ -45,118 +45,173 @@ Given the **same question** with **different instructions**:
 
 ---
 
-## Use Cases
+## 1) What you can run today
 
-- Instruction tuning and alignment analysis  
-- Causal localization of misleading or corrective prompts  
-- Prompt strategy comparison at the representation level  
-- Layer-wise instruction sensitivity studies  
+✅ Implemented and runnable:
 
----
+- Local **batched inference** for *API-style JSONL requests* (OpenAI-like request objects) using HuggingFace Transformers.
+- **Streaming output** to JSONL (writes results per batch; no need to wait until completion).
+- **Resume mode**: if the output JSONL exists, skip `custom_id`s already written.
+- Robust stopping:
+  - Supports multiple `eos_token_id`s when available.
+  - Optional stop-string criterion that stops **only when all samples in a batch have stopped** (prevents truncation of other samples).
 
-## Project Structure
+## 2) Project layout
 
-- `ffqa_hidden_exchange.ipynb`  
-  Main experiment notebook, including:
-  - Instruction token alignment
-  - Hidden-state collection
-  - Layer-wise swapping
-  - Generation comparison
+```text
+hidden_state_swap_project/
+  README.md
+  requirements.txt
+  pyproject.toml
 
-- Outputs:
-  - `*.jsonl`: baseline and swapped generations
-  - `*.npy`: cached hidden states for further analysis
+  src/hs_swap/
+    __init__.py
+    io.py         # JSONL read/append + resume helper
+    models.py     # HF tokenizer/model load, padding-side fixes
+    prompting.py  # request -> prompt (chat template preferred)
+    inference.py  # batched generate + stop strings + json parse
 
----
+  scripts/
+    run_inference.py   # main runnable CLI
+```
 
-## Requirements
+## 3) Environment setup
 
-- Python ≥ 3.9  
-- PyTorch  
-- HuggingFace Transformers  
-- GPU recommended
+### Requirements
 
-It implements:
+- Python >= 3.9
+- CUDA GPU is strongly recommended (CPU will be extremely slow).
 
-- **Strict instruction token alignment** via `instr + "\n" + [SPACE]*pad + "\n"` so that the question span starts at the same token index.
-- A **single `[STATE]` token** appended to each question (`Question + "\n[STATE]"`), used as the intervention anchor.
-- **Hidden-state capture** at the `[STATE]` token position for selected Transformer layers.
-- **Hidden-state swapping** across two instructions (2-sample batch), injecting the swapped vectors at the same token position and layers.
-- Output logging to `*.jsonl` and cached state vectors to `*.npy`.
-
----
-
-## Install
+### Install dependencies
 
 ```bash
+cd hidden_state_swap_project
 pip install -r requirements.txt
-# or editable
+```
+
+(Optional, editable install for development)
+
+```bash
 pip install -e .
 ```
 
-> GPU is strongly recommended.
+## 4) Input format
 
----
+`run_inference.py` expects a JSONL file where each line is **one request object**.
 
-## Prepare data
+### Recommended OpenAI-style request shape
 
-Use a CSV file with a `Question` column (and optional TruthfulQA metadata columns like `Type`, `Category`, etc.).
-
-Example: `TruthfulQA.csv`
-
----
-
-## Run (reproduces the notebook main loop)
-
-```bash
-python scripts/run_truthfulqa_pair_swap.py   --model Qwen/Qwen2.5-7B-Instruct   --input-csv TruthfulQA.csv   --output-jsonl swapseed123_truthfulqa_qwen25_pair.jsonl   --state-npy stateseed123_truthfulqa_qwen25_pair.npy   --instruction-1 "Instruction: First, privately develop the accurate reasoning process, but do not disclose any reasoning. Then provide the shortest, factually correct final answer in no more than two sentences."   --instruction-2 "Instruction: First, internally remove common erroneous reasoning paths, but do not reveal any reasoning. Then output the most concise, factually correct final answer in at most two sentences."   --layers-to-swap 10-19   --pad-token-limit 64   --max-new-tokens 128
+```json
+{
+  "custom_id": "Mercury_7175875-1",
+  "method": "POST",
+  "url": "/v1/chat/completions",
+  "body": {
+    "messages": [
+      {"role": "system", "content": "You are a helpful assistant."},
+      {"role": "user", "content": "..."}
+    ],
+    "temperature": 0.3,
+    "max_tokens": 256
+  }
+}
 ```
 
-### Optional knobs (same semantics as the notebook)
+Also supported:
 
-- `--do-sample` enables sampling generation (default: greedy, `DO_SAMPLE=False`).
-- `--top-p` nucleus sampling parameter (default: `0.0`).
-- `--limit-n 100` to run only the first N rows (like `LIMIT_N`).
-- `--hf-endpoint https://hf-mirror.com` and `--hf-home /root/autodl-tmp/cache` to mimic the notebook's HF mirror/cache.
-- `--seed 123` sets Python/NumPy/Torch seeds (like the notebook).
+- Flattened: `{ "custom_id": "...", "messages": [...] }`
+- Plain prompt: `{ "custom_id": "...", "body": { "prompt": "..." } }`
 
----
+Prompt construction rule:
 
-## Outputs
+1) If `messages` exist and the tokenizer has `apply_chat_template`, we use it with `add_generation_prompt=True`.
+2) Otherwise we fall back to concatenating role/content lines.
 
-### JSONL output (`--output-jsonl`)
+## 5) Running batched inference
 
-Each line is a record for one dataset row, containing:
+### Basic usage (LLaMA / decoder-only instruct)
 
-- Original metadata (`row_id`, `Question`, etc.)
-- Baseline generations for the two instructions (`baseline1_response`, `baseline2_response`)
-- Swapped generations (`swap_2_to_1_response`, `swap_1_to_2_response`)
-- Logits-distance metrics (`swap_*_cos`, `swap_*_kl`)
+```bash
+python scripts/run_inference.py   --model allura-forge/Llama-3.3-8B-Instruct   --input odd_id.jsonl   --output local_outputs.jsonl   --batch-size 32   --max-new-tokens 256   --do-sample   --temperature 0.3   --resume
+```
 
-### NPY cache (`--state-npy`)
+### GLM-4 example
 
-`(num_rows*2, num_layers, hidden_dim)` array of baseline `[STATE]` hidden vectors, saved in the same order as the notebook:
+```bash
+python scripts/run_inference.py   --model zai-org/GLM-4-9B-0414   --input requests.jsonl   --output glm4_outputs.jsonl   --batch-size 16   --max-new-tokens 256   --do-sample   --temperature 0.3   --resume
+```
 
-- For each row: first instr1 baseline, then instr2 baseline.
+### Add stop strings (optional)
 
----
+Stop strings are applied **after decoding**. To avoid truncating other samples, the stop criterion only triggers when **all** samples in the batch have encountered one of the stop strings.
 
-## Code map to the notebook
+```bash
+python scripts/run_inference.py   --model allura-forge/Llama-3.3-8B-Instruct   --input requests.jsonl   --output out.jsonl   --stop-strings "<|eot_id|>" "</s>"
+```
 
-- Notebook tokenizer/model setup → `src/ffqa_swap/modeling.py`
-- Instruction alignment (`tokenize_instructions_and_align`) → `src/ffqa_swap/alignment.py`
-- Baseline forward + hook capture → `src/ffqa_swap/forward.py::forward_with_capture_batch_single_pos`
-- Injected forward + swap + metrics → `src/ffqa_swap/forward.py::forward_with_injected_state_batch_single_pos`
-- CSV reading → `src/ffqa_swap/data.py`
-- Main loop (per-row build, check state_pos, baseline, swap, write JSONL, save NPY) → `src/ffqa_swap/runner.py`
-- CLI wrapper → `scripts/run_truthfulqa_pair_swap.py`
+## 6) Output format
 
----
+The output file is a JSONL where each line is one result:
 
-## Notes / Assumptions (same as notebook)
+```json
+{
+  "custom_id": "Mercury_7175875-1",
+  "raw_output": "<full decoded text including prompt>",
+  "completion": "<decoded text after stripping prompt and stop strings>",
+  "json_output": { "task": "...", "verdict": {"A": {...}} },
+  "parse_error": null
+}
+```
 
-- `[STATE]` must tokenize to **exactly one token**.
-- `" "` must tokenize to **exactly one token** (needed for token-aligned space padding).
-- The code assumes Qwen-like architecture where decoder layers are accessible as `model.model.layers[...]`.
+Notes:
 
+- `raw_output` is the **entire** decoded string from `model.generate`.
+- `completion` removes the prompt prefix and then trims any `--stop-strings`.
+- `json_output` is a best-effort parse of either:
+  - the entire completion as JSON, or
+  - the first `{ ... }` block found inside the completion.
 
+## 7) Resume behavior
+
+If you pass `--resume` and the output JSONL already exists:
+
+- The script reads all existing lines and collects `custom_id`s.
+- Any input request with a `custom_id` already present is skipped.
+
+This matches the behavior in your notebook scripts.
+
+## 8) Performance and troubleshooting
+
+### (A) CUDA out of memory
+
+- Reduce `--batch-size`
+- Reduce `--max-new-tokens`
+- Consider using a smaller model
+
+### (B) Right-padding warning on decoder-only models
+
+This repo forces `tokenizer.padding_side = "left"` in `src/hs_swap/models.py`.
+
+### (C) Chat template errors
+
+If a tokenizer has no `apply_chat_template`, we fall back to a simple role-tagged string. If you need strict formatting for a specific model, implement a model-specific formatter in `src/hs_swap/prompting.py`.
+
+### (D) JSON parsing fails
+
+If your model sometimes returns trailing commentary, keep the strict JSON object inside a single `{...}` block. The parser will extract the first JSON object it sees.
+
+## 9) Next step: enabling hidden-state swap
+
+Your request mentions:
+
+- strict token alignment
+- hidden-state caching
+- layer-wise swapping
+
+However, the provided notebook (`Untitled-2.ipynb`) does not include those steps.
+
+If you upload the real swap notebook (`ffqa_hidden_exchange.ipynb`) or the swap code, I can:
+
+1) Implement `collect_hiddens.py` to cache hidden states per layer and token index.
+2) Implement `run_hidden_swap.py` to inject selected layers’ hidden states under token alignment.
+3) Keep the same JSONL IO + resume interface so it plugs into your pipeline.
