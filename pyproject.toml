@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hs-swap"
+version = "0.1.0"
+description = "Token-aligned hidden-state swap for instruction causal analysis"
+requires-python = ">=3.9"
+dependencies = [
+  "torch",
+  "transformers>=4.40.0",
+  "accelerate",
+  "numpy",
+  "tqdm",
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
