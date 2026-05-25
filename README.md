@@ -115,7 +115,7 @@ pip install -e .
       {"role": "system", "content": "You are a helpful assistant."},
       {"role": "user", "content": "..."}
     ],
-    "temperature": 0.3,
+    "temperature": 0.0,
     "max_tokens": 256
   }
 }
