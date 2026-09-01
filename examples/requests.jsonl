@@ -1,0 +1,2 @@
+{"custom_id":"chat-example","body":{"messages":[{"role":"system","content":"You are a concise assistant."},{"role":"user","content":"Say hello in one short sentence."}]}}
+{"custom_id":"prompt-example","body":{"prompt":"Complete this phrase: The sky is"}}

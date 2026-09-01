@@ -45,5 +45,7 @@ def load_written_custom_ids(output_jsonl: str) -> Set[str]:
 
 def append_jsonl(path: str, obj: Dict[str, Any]) -> None:
     """Append one record to JSONL."""
+    parent = os.path.dirname(os.path.abspath(path))
+    ensure_dir(parent)
     with open(path, "a", encoding="utf-8") as f:
         f.write(json.dumps(obj, ensure_ascii=False) + "\n")

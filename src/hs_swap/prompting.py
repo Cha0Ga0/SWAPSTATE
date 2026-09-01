@@ -37,8 +37,10 @@ def build_prompt_from_request(tokenizer: Any, req: Dict[str, Any]) -> str:
     """
     messages = _extract_messages(req)
     if messages is not None:
-        if hasattr(tokenizer, "apply_chat_template"):
-            return tokenizer.apply_chat_template(
+        apply_chat_template = getattr(tokenizer, "apply_chat_template", None)
+        chat_template = getattr(tokenizer, "chat_template", None)
+        if callable(apply_chat_template) and chat_template:
+            return apply_chat_template(
                 messages,
                 tokenize=False,
                 add_generation_prompt=True,

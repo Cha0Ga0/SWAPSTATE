@@ -6,14 +6,29 @@ build-backend = "setuptools.build_meta"
 name = "hs-swap"
 version = "0.1.0"
 description = "Token-aligned hidden-state swap for instruction causal analysis"
+readme = "README.md"
 requires-python = ">=3.9"
-dependencies = [
-  "torch",
-  "transformers>=4.40.0",
-  "accelerate",
-  "numpy",
-  "tqdm",
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
 ]
+dependencies = [
+  "torch>=2.1,<3",
+  "transformers>=4.40,<6",
+  "accelerate>=0.28,<2",
+  "numpy>=1.24,<3",
+  "tqdm>=4.66,<5",
+]
+
+[project.scripts]
+hs-swap-inference = "hs_swap.cli:main"
+hs-swap-experiment = "hs_swap.swap_cli:main"
+
+[project.urls]
+Repository = "https://github.com/Cha0Ga0/SWAPSTATE"
 
 [tool.setuptools]
 package-dir = {"" = "src"}

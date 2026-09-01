@@ -1,177 +1,204 @@
 # Hidden-State Swap for Instruction Causal Analysis
 
-This repository implements a **token-aligned hidden-state swap method** for analyzing the **causal effects of instructions on large language models**.
+<p align="right">English | <a href="README_zh.md">简体中文</a></p>
 
-The core goal is to isolate how *instructional differences* influence internal representations and final generations, while keeping the question itself fixed.
+SWAPSTATE provides reproducible local inference and token-aligned hidden-state
+interventions for HuggingFace decoder-only language models.
 
----
+> **Project status:** baseline inference, marker alignment, layer-output capture,
+> pairwise hidden-state injection, intervened generation, and logit metrics are
+> implemented and tested. The full layers 10--19 intervention path has also
+> been validated with Qwen2.5-7B-Instruct on a single 40 GB NVIDIA A100.
 
-## Key Idea
+## Features
 
-Given the **same question** with **different instructions**:
+- Batched local inference from OpenAI-style JSONL requests.
+- Streaming output and resume by `custom_id`.
+- Prompt-safe stop strings and token-exact completion decoding.
+- A configurable single-token `[STATE]` intervention marker.
+- Token-space alignment of a common question suffix across instruction variants.
+- Capture and simultaneous injection at arbitrary zero-based decoder layers.
+- Every ordered `source instruction → target instruction` swap for N variants.
+- Baseline/swapped generation, next-token IDs, cosine distance, and KL divergence.
+- Decoder-layer discovery for LLaMA/Qwen/Mistral/Gemma-style, GPT-2, GPT-NeoX,
+  and common encoder-decoder paths.
 
-1. **Baseline Forward Pass**
-   - Run each instruction independently
-   - Record hidden states at specific token positions and Transformer layers
+## Installation
 
-2. **Hidden-State Swap**
-   - Under strict token alignment
-   - Inject hidden states from Instruction A into Instruction B’s forward pass (and vice versa)
-   - Keep all other computations unchanged
-
-3. **Output Comparison**
-   - Observe how internal representation changes propagate to generation behavior
-   - Identify where instruction information is encoded across layers
-
----
-
-## Method Highlights
-
-- **Strict Token Alignment**
-  - All instructions are padded to the same token length
-  - Ensures semantic alignment of swapped hidden states
-
-- **Layer-wise Controlled Intervention**
-  - Arbitrary Transformer layers can be selected for swapping
-  - Enables fine-grained causal analysis
-
-- **Minimal Causal Perturbation**
-  - Direct hidden-state replacement only
-  - No retraining or parameter modification
-
-- **Reproducible and Extensible**
-  - Full hidden states are saved
-  - Supports downstream probing, similarity analysis, and causal tracing
-
----
-**We are still in the process of debugging this project.**
-**We are still in the process of debugging this project.**
-**We are still in the process of debugging this project.**
----
-
-## 1) What you can run today
-
-✅ Implemented and runnable:
-
-- Local **batched inference** for *API-style JSONL requests* (OpenAI-like request objects) using HuggingFace Transformers.
-- **Streaming output** to JSONL (writes results per batch; no need to wait until completion).
-- **Resume mode**: if the output JSONL exists, skip `custom_id`s already written.
-- Robust stopping:
-  - Supports multiple `eos_token_id`s when available.
-  - Optional stop-string criterion that stops **only when all samples in a batch have stopped** (prevents truncation of other samples).
-
-## 2) Project layout
-
-```text
-hidden_state_swap_project/
-  README.md
-  requirements.txt
-  pyproject.toml
-
-  src/hs_swap/
-    __init__.py
-    io.py         # JSONL read/append + resume helper
-    models.py     # HF tokenizer/model load, padding-side fixes
-    prompting.py  # request -> prompt (chat template preferred)
-    inference.py  # batched generate + stop strings + json parse
-
-  scripts/
-    run_inference.py   # main runnable CLI
-```
-
-## 3) Environment setup
-
-### Requirements
-
-- Python >= 3.9
-- CUDA GPU is strongly recommended (CPU will be extremely slow).
-
-### Install dependencies
+Python 3.9 or newer is required. A CUDA GPU is strongly recommended for 7B+
+models; the code also supports CPU execution for small-model testing.
 
 ```bash
-cd hidden_state_swap_project
+conda create --name stateswap python=3.10
+conda activate stateswap
 pip install -r requirements.txt
-```
-
-(Optional, editable install for development)
-
-```bash
 pip install -e .
 ```
 
-## 4) Input format
+This installs two commands:
 
-`run_inference.py` expects a JSONL file where each line is **one request object**.
+- `hs-swap-inference` for ordinary batched generation;
+- `hs-swap-experiment` for hidden-state interventions.
 
-### Recommended OpenAI-style request shape
+Compatibility wrappers remain available as `python scripts/run_inference.py`
+and `python scripts/run_swap.py`.
+
+## Hidden-state swap protocol
+
+For every experiment case:
+
+1. `[STATE]` is registered as one additional special token before model loading;
+   the model embedding table is resized when needed.
+2. Every instruction is tokenized without model-added special tokens.
+3. Attended single-token fillers are inserted between each instruction and the
+   shared question so that the entire question suffix and `[STATE]` have the
+   same absolute positions in every variant.
+4. A baseline forward pass captures each selected decoder block's output at the
+   marker position.
+5. For each ordered instruction pair, source vectors replace target vectors at
+   all selected layers.
+6. Injection happens once during the full-prompt forward/prefill. Hooks are
+   always removed with `finally`, including on errors.
+7. The intervened next-token distribution is compared with the target baseline,
+   and generation is repeated under the same intervention.
+
+Layer indices are zero-based. Passing several layers swaps all of them in the
+same forward pass, matching the notebook experiment.
+
+### Swap input
+
+Each JSONL line contains one common question and at least two instructions:
+
+```json
+{"custom_id":"capital-france","instructions":["Answer with the correct option.","Reason briefly, then answer with the correct option."],"question":"What is the capital of France?","options":{"A":"Paris","B":"Rome","C":"Berlin"}}
+```
+
+`options` may be an object or array. Alternatively, provide a fully formatted
+`question_block`. The CLI appends `[STATE]` when it is absent and rejects more
+than one marker. See `examples/swap_cases.jsonl`.
+
+For the notebook's 2×2 design, use `instruction_groups`:
+
+```json
+{"custom_id":"case-2x2","instruction_groups":[["wrong-1","wrong-2"],["correct-1","correct-2"]],"question":"..."}
+```
+
+This generates swaps in both directions across groups but excludes within-group
+swaps. See `examples/swap_group_case.jsonl`. An explicit `swap_pairs` array of
+`[source_index, target_index]` entries overrides either default.
+
+### Running a swap experiment
+
+```bash
+hs-swap-experiment \
+  --model Qwen/Qwen2.5-7B-Instruct \
+  --input examples/swap_cases.jsonl \
+  --output swap_outputs.jsonl \
+  --layers 10 11 12 13 14 15 16 17 18 19 \
+  --max-new-tokens 256 \
+  --pair-batch-size 4 \
+  --dtype bf16 \
+  --resume
+```
+
+For a CPU smoke test, use a small causal model and an existing layer:
+
+```bash
+hs-swap-experiment \
+  --model sshleifer/tiny-gpt2 \
+  --input examples/swap_cases.jsonl \
+  --output tiny_swap_outputs.jsonl \
+  --layers 0 \
+  --max-new-tokens 8 \
+  --device cpu \
+  --dtype fp32
+```
+
+Sampling is opt-in with `--do-sample --temperature 0.7 --top-p 0.9`.
+Remote model code is disabled unless `--trust-remote-code` is explicitly passed.
+
+### Swap output
+
+One result is written per case:
 
 ```json
 {
-  "custom_id": "Mercury_7175875-1",
-  "method": "POST",
-  "url": "/v1/chat/completions",
-  "body": {
-    "messages": [
-      {"role": "system", "content": "You are a helpful assistant."},
-      {"role": "user", "content": "..."}
-    ],
-    "temperature": 0.0,
-    "max_tokens": 256
-  }
+  "custom_id": "capital-france",
+  "status": "ok",
+  "layers": [10, 11],
+  "state_position": 42,
+  "instruction_token_lengths": [6, 10],
+  "filler_counts": [4, 0],
+  "baselines": [
+    {"instruction_index": 0, "next_token_id": 123, "completion": "..."}
+  ],
+  "swaps": [
+    {
+      "source_instruction_index": 1,
+      "target_instruction_index": 0,
+      "next_token_id": 456,
+      "completion": "...",
+      "cosine_distance": 0.01,
+      "kl_divergence": 0.02
+    }
+  ],
+  "error": null
 }
 ```
 
-Also supported:
+With a flat list of N instructions, `baselines` has N entries and `swaps` has
+`N × (N - 1)` entries. Grouped inputs contain only cross-group pairs; explicit
+pairs contain exactly the requested interventions. Pair generation is chunked
+by `--pair-batch-size`. Without `--fail-fast`, a failing case is recorded with
+`status: "error"` and processing continues.
 
-- Flattened: `{ "custom_id": "...", "messages": [...] }`
-- Plain prompt: `{ "custom_id": "...", "body": { "prompt": "..." } }`
+## Ordinary batched inference
 
-Prompt construction rule:
-
-1) If `messages` exist and the tokenizer has `apply_chat_template`, we use it with `add_generation_prompt=True`.
-2) Otherwise we fall back to concatenating role/content lines.
-
-## 5) Running batched inference
-
-### Basic usage (LLaMA / decoder-only instruct)
-
-```bash
-python scripts/run_inference.py   --model allura-forge/Llama-3.3-8B-Instruct   --input odd_id.jsonl   --output local_outputs.jsonl   --batch-size 32   --max-new-tokens 256   --do-sample   --temperature 0.3   --resume
-```
-
-### GLM-4 example
-
-```bash
-python scripts/run_inference.py   --model zai-org/GLM-4-9B-0414   --input requests.jsonl   --output glm4_outputs.jsonl   --batch-size 16   --max-new-tokens 256   --do-sample   --temperature 0.3   --resume
-```
-
-### Add stop strings (optional)
-
-Stop strings are applied **after decoding**. To avoid truncating other samples, the stop criterion only triggers when **all** samples in the batch have encountered one of the stop strings.
-
-```bash
-python scripts/run_inference.py   --model allura-forge/Llama-3.3-8B-Instruct   --input requests.jsonl   --output out.jsonl   --stop-strings "<|eot_id|>" "</s>"
-```
-
-## 6) Output format
-
-The output file is a JSONL where each line is one result:
+The inference input is OpenAI-style JSONL:
 
 ```json
-{
-  "custom_id": "Mercury_7175875-1",
-  "raw_output": "<full decoded text including prompt>",
-  "completion": "<decoded text after stripping prompt and stop strings>",
-  "json_output": { "task": "...", "verdict": {"A": {...}} },
-  "parse_error": null
-}
+{"custom_id":"request-1","body":{"messages":[{"role":"system","content":"You are helpful."},{"role":"user","content":"Say hello."}]}}
 ```
 
-Notes:
+Plain `prompt` fields and flattened requests are also supported.
 
-- `raw_output` is the **entire** decoded string from `model.generate`.
-- `completion` removes the prompt prefix and then trims any `--stop-strings`.
-- `json_output` is a best-effort parse of either:
-  - the entire completion as JSON, or
-  - the first `{ ... }` block found inside the completion.
+```bash
+hs-swap-inference \
+  --model allura-forge/Llama-3.3-8B-Instruct \
+  --input requests.jsonl \
+  --output local_outputs.jsonl \
+  --batch-size 32 \
+  --max-new-tokens 256 \
+  --resume
+```
 
+`--stop` and `--stop-strings` are aliases. Stop strings are checked only in
+newly generated tokens. Each result contains `custom_id`, `raw_output`,
+`completion`, `json_output`, and `parse_error`.
+
+## Tests
+
+```bash
+python -m unittest discover -s tests -v
+```
+
+Tests cover alignment, marker validation, layer discovery, capture, identity
+injection, cross-sample swaps, intervened generation, hook cleanup, CLI parsing,
+prompt fallback, stopping, EOS handling, decoding, metrics, and JSONL I/O.
+
+A CUDA integration run with `Qwen/Qwen2.5-7B-Instruct` additionally validates
+the notebook-style 2x2 grouped experiment: four baselines and all eight directed
+cross-group swaps, with simultaneous injection at decoder layers 10 through 19.
+
+## Current limitations
+
+- Alignment applies to the common question suffix and marker position; it does
+  not claim semantic one-to-one alignment between different instruction tokens.
+- Captured states are decoder-block outputs at `[STATE]`, matching the reference
+  notebook. Other intervention sites require an explicit extension.
+- Adding a new marker resizes the embedding table. Its initialization is seeded,
+  and every baseline and intervention in a run uses the same marker embedding.
+- Swap cases are processed one at a time; instruction variants are batched and
+  ordered pairs are processed in bounded chunks.
+- Hidden vectors are not yet persisted as separate artifacts.
+- New model architectures may need an additional decoder-layer resolver path.
