@@ -1,14 +1,38 @@
-# Hidden-State Swap for Instruction Causal Analysis
+# StateSwap: Probing Support–Elimination Hidden States in Multiple-Choice Questions
 
 <p align="right">English | <a href="README_zh.md">简体中文</a></p>
+
+> Code for the EMNLP 2026 paper **“StateSwap: Probing Support–Elimination
+> Hidden States in Multiple-Choice Questions.”**
+
+## Abstract
+
+Large language models often answer the same multiple-choice question
+inconsistently when it is posed under support-oriented and elimination-oriented
+framings. We investigate whether these discrepancies arise from different
+internal representations induced by the two framings. We introduce a
+dual-framing protocol with minimally varied prompts that use either support- or
+elimination-oriented framing while keeping the evaluation target fixed. To probe
+the internal computation, we append an untrained special token, `[STATE]`, and
+treat its residual-stream activation as an intervention interface. Across both
+models, the two framings induce separable `[STATE]` activations concentrated in
+intermediate layers. Swapping these activations between paired prompts
+systematically changes predictions and improves cross-framing agreement,
+providing intervention-based evidence that the activations are behaviorally
+relevant. Beyond instance-level substitution, mean-difference steering
+directions derived from the dual-framing contrast exhibit more bounded
+layer-wise responses than matched contrastive activation addition directions
+under the evaluated protocol.
+
+## Implementation status
 
 SWAPSTATE provides reproducible local inference and token-aligned hidden-state
 interventions for HuggingFace decoder-only language models.
 
-> **Project status:** baseline inference, marker alignment, layer-output capture,
-> pairwise hidden-state injection, intervened generation, and logit metrics are
-> implemented and tested. The full layers 10--19 intervention path has also
-> been validated with Qwen2.5-7B-Instruct on a single 40 GB NVIDIA A100.
+Baseline inference, marker alignment, layer-output capture, pairwise hidden-state
+injection, intervened generation, and logit metrics are implemented and tested.
+The full layers 10–19 intervention path has also been validated with
+Qwen2.5-7B-Instruct on a single 40 GB NVIDIA A100.
 
 ## Features
 

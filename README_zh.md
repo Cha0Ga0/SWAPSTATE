@@ -1,10 +1,19 @@
-# 用于指令因果分析的隐藏状态交换
+# StateSwap：探测多项选择题中的支持式—排除式隐藏状态
 
 <p align="right"><a href="README.md">English</a> | 简体中文</p>
 
+> EMNLP 2026 论文 **《StateSwap: Probing Support–Elimination Hidden States in
+> Multiple-Choice Questions》** 的代码实现。
+
+## 摘要
+
+大型语言模型面对同一道多项选择题时，如果问题分别采用支持导向和排除导向的措辞，往往会给出不一致的答案。我们研究这种差异是否源于两种措辞所诱导的不同内部表征。为此，我们提出一种双措辞协议：在保持评估目标不变的同时，仅对 prompt 做最小改动，使其分别采用支持导向或排除导向的表述。为了探测内部计算过程，我们追加一个未经训练的特殊 token `[STATE]`，并将其在 residual stream 中的 activation 作为干预接口。在所评估的两个模型中，两种措辞会诱导出可分离的 `[STATE]` activation，且这种差异主要集中在中间层。将这些 activation 在配对 prompt 之间交换，会系统性地改变预测并提高跨措辞的一致性；这提供了基于干预的证据，表明这些 activation 与模型行为具有因果关联。除逐样本替换外，由双措辞对比导出的均值差 steering 方向，相较于匹配的 contrastive activation addition 方向，在本实验协议下呈现出更有界的逐层响应。
+
+## 实现状态
+
 SWAPSTATE 为 HuggingFace decoder-only 语言模型提供可复现的本地推理和 token 对齐隐藏状态干预。
 
-> **项目状态：** 基线推理、标记对齐、层输出捕获、成对隐藏状态注入、干预后生成和 logits 指标均已实现并通过测试。完整的第 10–19 层干预流程也已使用 Qwen2.5-7B-Instruct 在单张 40 GB NVIDIA A100 上验证。
+基线推理、标记对齐、层输出捕获、成对隐藏状态注入、干预后生成和 logits 指标均已实现并通过测试。完整的第 10–19 层干预流程也已使用 Qwen2.5-7B-Instruct 在单张 40 GB NVIDIA A100 上验证。
 
 ## 功能
 
